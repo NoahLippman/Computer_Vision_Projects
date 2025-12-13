@@ -2,6 +2,17 @@ import cv2
 import os
 
 def download(path, vidNum):
+    """
+    Creates a png file for every 10th frame starting at 4 seconds for a given path
+    Helps generate training data for roboflow keypoint detection
+
+    Args:
+        path (str): video path
+        vidNum (int): Number of video in path
+
+    Return:
+        Nothing, just writes the fial to disk
+    """
     output_dir = '/Users/noahlippman/Documents/Catcher_Pictures_cropped_4+Secs'
     os.makedirs(output_dir, exist_ok=True)
 

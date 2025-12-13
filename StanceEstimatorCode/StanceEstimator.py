@@ -1,20 +1,21 @@
+import os
+
 from inference_sdk import InferenceHTTPClient
+import numpy as np
 import cv2
-import uuid
 from ultralytics import YOLO
+import mediapipe as mp
+import pandas as pd
 
-
-# Initialize the keypoint detection model
+# initialize the client
 CLIENT = InferenceHTTPClient(
     api_url="https://serverless.roboflow.com",
     api_key="dQKcEYMXDMssKrAQV4ck"
 )
-# Initalize the ball tracking model
 ball_track_model = YOLO('https://data.balldatalab.com/index.php/s/YkGBwbFtsf34ky3/download/ball_tracking_v4-YOLOv11.pt')
 
 
-
-def trim_video_for_model(input_path: str, output_path: str, vertical_crop: int, time_crop = -1, frame_crop = 0):
+def trim_video_for_model(input_path, output_path, vertical_crop, time_crop):
     """
     Trims the given video for the provided vertical crop
     Also trimes for frame_crop if provided otherwise it starts 3 seconds - time_crop
@@ -34,17 +35,15 @@ def trim_video_for_model(input_path: str, output_path: str, vertical_crop: int, 
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    # Trim the video by time and by vertical crop
-    start_time = 3 - time_crop
-    start_frame = int(start_time * fps) if time_crop != -1 else frame_crop
+    start_time = 4 - time_crop
+    start_frame = int(start_time * fps)
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     new_height = height - vertical_crop
 
-    # Create a VideoWriter var
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    # Use H.264 codec (most compatible with models)
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # or 'mp4v'
     out = cv2.VideoWriter(output_path, fourcc, fps, (width, new_height))
 
-    # Write each cropped frame to the video writer
     frame_count = 0
     while True:
         ret, frame = cap.read()
@@ -70,18 +69,15 @@ def estimateStance(coordinates : dict) -> str:
         str: The estimated catcher stance
     """
     try:
-        # Get keypoint predictions
         preds = coordinates.get('predictions')
         keypoints = preds[0].get('keypoints')
         keypointList = [[i.get('x'), i.get('y')] for i in keypoints]
 
-        # Ensure that coordinates are attributed to the correct body part
         LeftKnee = keypointList[0] if keypointList[0][0] < keypointList[2][0] else keypointList[2]
         RightKnee = keypointList[2] if keypointList[0][0] < keypointList[2][0] else keypointList[0]
         LeftAnkle = keypointList[1] if keypointList[0][0] < keypointList[2][0] else keypointList[3]
         RightAnkle = keypointList[3] if keypointList[0][0] < keypointList[2][0] else keypointList[1]
 
-        # Return stance logic
         if abs(LeftKnee[0] - RightKnee[0]) < 50:
             return "None"
         elif abs(LeftKnee[1] - RightKnee[1]) < 10:
@@ -138,8 +134,9 @@ def findCoordinates(path, vertical_crop, time_crop):
     # Trim video
     ball_identified = False
     frame_count_initial = 0
-    start_frame, trimmed_path = trim_video_for_model(path, f'cropped.mp4', vertical_crop, time_crop=time_crop)
-    results = ball_track_model.predict(trimmed_path, show=False, stream=True)
+    start_frame, trimmed_path = trim_video_for_model(path, 'untrimmed.mp4', vertical_crop, time_crop)
+
+    results = ball_track_model.predict(trimmed_path, show=True, stream=True)
     for r in results:
         boxes = r.boxes  # Boxes object for bbox outputs
         try:
@@ -150,25 +147,26 @@ def findCoordinates(path, vertical_crop, time_crop):
         except:
             pass
         frame_count_initial += 1
-        #If we have tracked 400 frames with no ball capture, break
         if (frame_count_initial > 400):
             return None
-    cap = None
-    # Take original video and trim to new video that starts where the ball was first captured
-    if ball_identified:
-        start_frame, new_path = trim_video_for_model(path, f"full_height.mp4", 0, frame_crop=start_frame + frame_count_initial)
-        cap = cv2.VideoCapture(new_path)
 
-    #placeholder = st.empty()
-    stack = []
-    while frame_count < 20:
+    cv2.waitKey(50)
+    cv2.destroyAllWindows()
+    cv2.waitKey(1)
+
+    if ball_identified:
+        cap = cv2.VideoCapture(path)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame + frame_count_initial)
+
+    while ball_identified and frame_count < 20:
         ret, frame = cap.read()
+
+        tracked = False
+
         if not ret:
             break
-        # Track every 2nd frame
         if frame_count % 2 == 0:
             result = CLIENT.infer(frame, model_id="catching-stance-estimator-uimxn/6")
-            stack.append(result.get("predictions")[0].get("keypoints"))
             stance = estimateStance(result)
             print(stance)
             try:
@@ -179,16 +177,49 @@ def findCoordinates(path, vertical_crop, time_crop):
                 pass
 
         try:
-            # Draw the keypoints on the video
-            for joint in stack[-1]:
+            for joint in result.get("predictions")[0].get("keypoints"):
                 coords = (int(joint.get("x")), int(joint.get("y")))
                 cv2.circle(frame, coords, 10, (0, 0, 0), cv2.FILLED)
         except:
             pass
+
+        cv2.imshow("frame", frame)
+        cv2.waitKey(100)
+        tracked = False
 
         frame_count += 1
 
     cv2.destroyAllWindows()
 
     mcs = max(stanceCounts, key = stanceCounts.get)
-    return [mcs, stanceCounts.get(mcs)/frames_tracked]
+    try:
+        return [mcs, stanceCounts.get(mcs)/frames_tracked]
+    except:
+        return None
+
+if __name__ == "__main__":
+    """
+    Iterates through a folder and generates the stance for each video
+    Produces a dataframe of stances
+    """
+    folder_path = "/Users/noahlippman/Documents/Catcher_Vids_Xavier/video/New Folder With Items"
+    i = 1
+    vertical_crop = 290
+
+    stances = {'pitch': [], 'stance': [], 'confidence': []}
+    for filename in os.listdir(folder_path):
+        if filename == '.DS_Store':
+            continue
+        file_path = os.path.join(folder_path, filename)
+        if os.path.isfile(file_path):
+            stance = ProcessVideo(file_path, vertical_crop)
+            print(stance)
+            mp4_loc = file_path.find(".mp4")
+            pitchNo = file_path[mp4_loc - 1:mp4_loc]
+            stances['pitch'].append(pitchNo)
+            stances['stance'].append(stance[0])
+            stances['confidence'].append(stance[1])
+            print(file_path)
+
+    stanceDataFrame = pd.DataFrame.from_dict(stances)
+    stanceDataFrame.to_csv("/Users/noahlippman/Documents/Catcher_Stance_DataFrame/Xavier_stances.csv")

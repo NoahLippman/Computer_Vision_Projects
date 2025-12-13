@@ -1,13 +1,12 @@
 import math
-import os.path
 import tempfile
-
 import pandas as pd
 import streamlit as st
 import cv2
 import StanceEstimatorOnline
 import time
 
+# Setup Page
 if "clicked" not in st.session_state:
     st.session_state.clicked = False
 
@@ -15,6 +14,7 @@ st.set_page_config(page_title = "File Uploader")
 
 upload_containter = st.container()
 
+# Upload section
 if not st.session_state.clicked:
     with upload_containter:
         folder = st.file_uploader("Choose a Folder of Videos", accept_multiple_files="directory", type = "mp4")
@@ -37,9 +37,11 @@ if not st.session_state.clicked:
                 cropped = frame[0:bottom_crop, 0:w]
                 st.image(cropped, channels="BGR")
 
+        # Logic for setting state variables and leaving initial page on click
         def mark_clicked():
             st.session_state.clicked = True
             st.session_state.final_crop = bottom_crop
+            # Write all byte contents of each file to a session state variable
             st.session_state.folder = []
             for f in folder:
                 f.seek(0)
@@ -49,6 +51,8 @@ if not st.session_state.clicked:
             st.rerun()
         st.button(label = "Submit Crop", on_click = mark_clicked)
 
+# Second page that tracks processing progress
+# Only shows once button to submit crop is clicked
 if st.session_state.clicked:
         processed_container = st.empty()
         time_container = st.empty()
@@ -56,9 +60,11 @@ if st.session_state.clicked:
         filesProcessed = 0
         folderLength = len(st.session_state.folder)
 
+        # Iterate over all files in the folder
         stances = {'pitch': [], 'stance': [], 'confidence': []}
         for file_contents in st.session_state.folder:
             curr = time.time()
+            # Create temp file to use cv VideoCapture
             tfile = tempfile.NamedTemporaryFile(delete=False)
             tfile.write(file_contents.get('contents'))
             tfile.flush()
@@ -66,6 +72,7 @@ if st.session_state.clicked:
             cap = cv2.VideoCapture(tfile.name)
             fps = cap.get(cv2.CAP_PROP_FPS)
             success, frame = cap.read()
+            # Get the stance for the specific video
             stance = StanceEstimatorOnline.ProcessVideo(tfile.name, st.session_state.final_crop)
             stances['pitch'].append(file_contents.get('number'))
             stances['stance'].append(stance[0])
@@ -74,6 +81,7 @@ if st.session_state.clicked:
             filesProcessed += 1
             secondsremaining = (timeSum/filesProcessed) * (folderLength -  filesProcessed)
 
+            # Logic to print files processed and time remaining
             with processed_container:
                 processed_container.empty()
                 st.write(f"Files processed = {filesProcessed}")
@@ -81,6 +89,7 @@ if st.session_state.clicked:
                 time_container.empty()
                 st.write(f"Time remaining = {math.floor(secondsremaining/60)} minutes")
 
+        # Write the dataframe of stances
         st.write(pd.DataFrame.from_dict(stances))
 
 ##folder = "/Users/noahlippman/Documents/Catcher_Vids_Xavier/video"
