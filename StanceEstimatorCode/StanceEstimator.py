@@ -35,7 +35,7 @@ def trim_video_for_model(input_path, output_path, vertical_crop, time_crop):
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    start_time = 4 - time_crop
+    start_time = 3 - time_crop
     start_frame = int(start_time * fps)
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     new_height = height - vertical_crop
@@ -202,7 +202,7 @@ if __name__ == "__main__":
     Iterates through a folder and generates the stance for each video
     Produces a dataframe of stances
     """
-    folder_path = "/Users/noahlippman/Documents/Catcher_Vids_Xavier/video/New Folder With Items"
+    folder_path = "/Users/noahlippman/Documents/Catcher Vids/UNLV_2_14/video/New Folder With Items"
     i = 1
     vertical_crop = 290
 
